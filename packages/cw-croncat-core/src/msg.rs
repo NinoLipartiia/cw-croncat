@@ -241,7 +241,7 @@ pub struct GetSlotIdsResponse {
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::{coin, coins, BankMsg, CosmosMsg, Timestamp};
+    use cosmwasm_std::{coin, coins, BankMsg, CosmosMsg, Timestamp, Uint128};
     use cw20::Cw20CoinVerified;
 
     use crate::types::AgentStatus;
@@ -275,6 +275,7 @@ mod tests {
         .into();
 
         let task = Task {
+            funds_withdrawn_recurring: Uint128::zero(),
             owner_id: Addr::unchecked("nobody".to_string()),
             interval: Interval::Immediate,
             boundary: BoundaryValidated {

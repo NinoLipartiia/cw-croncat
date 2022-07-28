@@ -95,6 +95,16 @@ impl<'a> CwCroncat<'a> {
 
         let task = some_task.unwrap();
 
+        //Restrict bank msg so contract doesnt get drained
+        if task.is_reccuring()
+            && task.contains_send_msg()
+            && !task.is_valid_msg(&env.contract.address, &info.sender, &c.owner_id)
+        {
+            return Err(ContractError::CustomError {
+                val: "Invalid process_call message!".to_string(),
+            });
+        }
+
         // TODO: Bring this back!
         // // Fee breakdown:
         // // - Used Gas: Task Txn Fee Cost
@@ -234,15 +244,15 @@ impl<'a> CwCroncat<'a> {
         }
 
         // reschedule next!
-        if let Some(task) = self.tasks.may_load(deps.storage, task_hash)? {
-            let task_hash = task.to_hash();
+        if let Some(task) = self.tasks.may_load(deps.storage, task_hash.clone())? {
+            let task_hash_str = task.to_hash();
             // TODO: How can we compute gas & fees paid on this txn?
             // let out_of_funds = call_total_balance > task.total_deposit;
 
             // if non-recurring, exit
             if task.stop_on_fail && reply_submsg_failed {
                 // Process task exit, if no future task can execute
-                let rt = self.remove_task(deps, task_hash);
+                let rt = self.remove_task(deps, task_hash_str);
                 if let Ok(..) = rt {
                     let resp = rt.unwrap();
                     response = response
@@ -258,7 +268,7 @@ impl<'a> CwCroncat<'a> {
 
             // If the next interval comes back 0, then this task should not schedule again
             if next_id == 0 {
-                let rt = self.remove_task(deps, task_hash.clone());
+                let rt = self.remove_task(deps, task_hash_str.clone());
                 if let Ok(..) = rt {
                     let resp = rt.unwrap();
                     response = response
@@ -266,8 +276,14 @@ impl<'a> CwCroncat<'a> {
                         .add_submessages(resp.messages)
                         .add_events(resp.events);
                 }
-                response = response.add_attribute("ended_task", task_hash);
+                response = response.add_attribute("ended_task", task_hash_str);
                 return Ok(response);
+            } else {
+                //If Send and reccuring task increment withdrawn funds so contract doesnt get drained
+                if task.contains_send_msg() && task.is_reccuring() {
+                    //task.funds_withdrawn_recurring.saturating_add(msg..funds[0].amount);
+                    self.tasks.save(deps.storage, task_hash, &task)?;
+                }
             }
 
             response = response.add_attribute("slot_id", next_id.to_string());
