@@ -245,7 +245,7 @@ impl Task {
                         || self.total_deposit[0].denom != "ujunox"
                         || amount.is_empty()
                         || amount[0].denom != "ujunox"
-                        || amount[0].amount < self.total_deposit[0].amount
+                        || amount[0].amount > self.total_deposit[0].amount
                     {
                         valid = false
                     } else {
