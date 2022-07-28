@@ -50,7 +50,6 @@ REGISTER_AGENT='{"register_agent":{}}'
 junod tx wasm execute $CONTRACT "$REGISTER_AGENT" --from $AGENT $TXFLAG -y
 
 # Create tasks for staking, sending and burning tokens
-#STAKE='{"create_task":{"task":{"interval":"Once","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"1000000"}}}},"gas_limit":150000}],"rules":null}}}'
 STAKE='{
   "create_task": {
     "task": {
@@ -79,7 +78,6 @@ STAKE='{
 }'
 junod tx wasm execute $CONTRACT "$STAKE" --amount 1000000ujunox --from $USER $TXFLAG -y
 
-#SEND='{"create_task":{"task":{"interval":"Once","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"bank":{"send":{"to_address":"juno1e48ptufsh6yplls6vmy4827uxnxlmpdul0nqkg","amount":[{"denom":"ujunox","amount":"10000"}]}}},"gas_limit":150000}],"rules":null}}}'
 SEND='{
   "create_task": {
     "task": {
