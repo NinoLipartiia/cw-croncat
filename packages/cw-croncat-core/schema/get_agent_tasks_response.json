@@ -300,6 +300,21 @@
         }
       ]
     },
+    "Cw20CoinVerified": {
+      "type": "object",
+      "required": [
+        "address",
+        "amount"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/Addr"
+        },
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
     "DistributionMsg": {
       "description": "The message types of the distribution module.\n\nSee https://github.com/cosmos/cosmos-sdk/blob/v0.42.4/proto/cosmos/distribution/v1beta1/tx.proto",
       "oneOf": [
@@ -689,6 +704,7 @@
         "owner_id",
         "stop_on_fail",
         "task_hash",
+        "total_cw20_deposit",
         "total_deposit"
       ],
       "properties": {
@@ -728,6 +744,12 @@
         },
         "task_hash": {
           "type": "string"
+        },
+        "total_cw20_deposit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20CoinVerified"
+          }
         },
         "total_deposit": {
           "type": "array",

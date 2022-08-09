@@ -252,11 +252,74 @@
     {
       "type": "object",
       "required": [
+        "refill_task_cw20_balance"
+      ],
+      "properties": {
+        "refill_task_cw20_balance": {
+          "type": "object",
+          "required": [
+            "cw20_coins",
+            "task_hash"
+          ],
+          "properties": {
+            "cw20_coins": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Cw20Coin"
+              }
+            },
+            "task_hash": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
         "proxy_call"
       ],
       "properties": {
         "proxy_call": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Receive cw20 token",
+      "type": "object",
+      "required": [
+        "receive"
+      ],
+      "properties": {
+        "receive": {
+          "$ref": "#/definitions/Cw20ReceiveMsg"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "withdraw_wallet_balance"
+      ],
+      "properties": {
+        "withdraw_wallet_balance": {
+          "type": "object",
+          "required": [
+            "cw20_amounts"
+          ],
+          "properties": {
+            "cw20_amounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Cw20Coin"
+              }
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -581,6 +644,21 @@
         }
       ]
     },
+    "Cw20Coin": {
+      "type": "object",
+      "required": [
+        "address",
+        "amount"
+      ],
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
     "Cw20CoinVerified": {
       "type": "object",
       "required": [
@@ -593,6 +671,26 @@
         },
         "amount": {
           "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
+    "Cw20ReceiveMsg": {
+      "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a ExecuteMsg",
+      "type": "object",
+      "required": [
+        "amount",
+        "msg",
+        "sender"
+      ],
+      "properties": {
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "msg": {
+          "$ref": "#/definitions/Binary"
+        },
+        "sender": {
+          "type": "string"
         }
       }
     },
@@ -987,6 +1085,7 @@
       "type": "object",
       "required": [
         "actions",
+        "cw20_coins",
         "interval",
         "stop_on_fail"
       ],
@@ -1006,6 +1105,12 @@
               "type": "null"
             }
           ]
+        },
+        "cw20_coins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20Coin"
+          }
         },
         "interval": {
           "$ref": "#/definitions/Interval"

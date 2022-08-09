@@ -30,6 +30,9 @@ pub enum ContractError {
     #[error("Can't attach deposit")]
     AttachedDeposit {},
 
+    #[error("Only owner can refill their task")]
+    RefillNotTaskOwner {},
+
     #[error("Custom Error val: {val:?}")]
     CustomError { val: String },
     // Add any other custom errors you like here.

@@ -3,7 +3,7 @@ use crate::types::{
 };
 use crate::types::{Agent, SlotType};
 use cosmwasm_std::{Addr, Coin, Timestamp, Uint64};
-use cw20::Balance;
+use cw20::{Balance, Cw20Coin, Cw20CoinVerified};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,7 @@ pub struct Croncat {
     get_task_hash_response: Option<String>,
     get_slot_hashes_response: Option<GetSlotHashesResponse>,
     get_slot_ids_response: Option<GetSlotIdsResponse>,
+    get_wallet_balances_response: Option<GetWalletBalancesResponse>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
@@ -98,7 +99,16 @@ pub enum ExecuteMsg {
     RefillTaskBalance {
         task_hash: String,
     },
+    RefillTaskCw20Balance {
+        task_hash: String,
+        cw20_coins: Vec<Cw20Coin>,
+    },
     ProxyCall {},
+    /// Receive cw20 token
+    Receive(cw20::Cw20ReceiveMsg),
+    WithdrawWalletBalance {
+        cw20_amounts: Vec<Cw20Coin>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -133,6 +143,9 @@ pub enum QueryMsg {
         slot: Option<u64>,
     },
     GetSlotIds {},
+    GetWalletBalances {
+        wallet: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -158,6 +171,11 @@ pub struct GetBalancesResponse {
     pub cw20_whitelist: Vec<Addr>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct GetWalletBalancesResponse {
+    pub cw20_balances: Vec<Cw20CoinVerified>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 pub struct GetAgentIdsResponse {
     pub active: Vec<Addr>,
@@ -172,6 +190,35 @@ pub struct AgentTaskResponse {
     pub num_cron_tasks_extra: Uint64,
 }
 
+impl AgentTaskResponse {
+    pub fn has_any_slot_tasks(&self, slot_kind: SlotType) -> bool {
+        if self.num_of_slot_tasks(slot_kind) < 1u64 {
+            return false;
+        }
+        true
+    }
+    pub fn num_of_slot_tasks(&self, slot_kind: SlotType) -> u64 {
+        if slot_kind == SlotType::Block {
+            return self.num_block_tasks.u64();
+        }
+
+        self.num_cron_tasks.u64()
+    }
+    pub fn has_any_slot_extra_tasks(&self, slot_kind: SlotType) -> bool {
+        if self.num_of_slot_extra_tasks(slot_kind) < 1u64 {
+            return false;
+        }
+        true
+    }
+    pub fn num_of_slot_extra_tasks(&self, slot_kind: SlotType) -> u64 {
+        if slot_kind == SlotType::Block {
+            return self.num_block_tasks_extra.u64();
+        }
+
+        self.num_cron_tasks_extra.u64()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TaskRequest {
     pub interval: Interval,
@@ -179,6 +226,7 @@ pub struct TaskRequest {
     pub stop_on_fail: bool,
     pub actions: Vec<Action>,
     pub rules: Option<Vec<Rule>>,
+    pub cw20_coins: Vec<Cw20Coin>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -189,6 +237,7 @@ pub struct TaskResponse {
     pub boundary: Option<Boundary>,
     pub stop_on_fail: bool,
     pub total_deposit: Vec<Coin>,
+    pub total_cw20_deposit: Vec<Cw20CoinVerified>,
     pub actions: Vec<Action>,
     pub rules: Option<Vec<Rule>>,
 }
@@ -219,6 +268,7 @@ impl From<Task> for TaskResponse {
             boundary,
             stop_on_fail: task.stop_on_fail,
             total_deposit: task.total_deposit,
+            total_cw20_deposit: task.total_cw20_deposit,
             actions: task.actions,
             rules: task.rules,
         }
@@ -284,6 +334,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: vec![],
+            total_cw20_deposit: vec![],
             actions: vec![Action {
                 msg,
                 gas_limit: Some(150_000),
@@ -333,6 +384,7 @@ mod tests {
             stop_on_fail: true,
             actions: vec![],
             rules: None, // TODO
+            cw20_coins: vec![],
         }
         .into();
         let task_response_raw = TaskResponse {
@@ -345,6 +397,7 @@ mod tests {
             }),
             stop_on_fail: true,
             total_deposit: vec![coin(5, "earth")],
+            total_cw20_deposit: vec![],
             actions: vec![],
             rules: None,
         };
@@ -375,6 +428,13 @@ mod tests {
             block_ids: vec![3],
         }
         .into();
+        let get_wallet_balances_response = GetWalletBalancesResponse {
+            cw20_balances: vec![Cw20CoinVerified {
+                address: Addr::unchecked("Bob"),
+                amount: 5u128.into(),
+            }],
+        }
+        .into();
         let croncat = Croncat {
             agent,
             task,
@@ -392,6 +452,7 @@ mod tests {
             get_task_hash_response,
             get_slot_hashes_response,
             get_slot_ids_response,
+            get_wallet_balances_response,
         };
 
         let ser = serde_json_wasm::to_string(&croncat);

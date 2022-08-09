@@ -1,16 +1,19 @@
 use cosmwasm_std::{
-    Addr, BankMsg, Binary, Coin, CosmosMsg, Empty, Env, GovMsg, IbcMsg, StdError, Timestamp,
-    Uint128, Uint64, WasmMsg,
+    Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Empty, Env, GovMsg, IbcMsg, OverflowError,
+    OverflowOperation::Sub, StdError, Timestamp, Uint128, Uint64, WasmMsg,
 };
 use cron_schedule::Schedule;
-use cw20::Cw20CoinVerified;
+use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
 use hex::encode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 
-use crate::{error::CoreError, traits::Intervals};
+use crate::{
+    error::CoreError,
+    traits::{BalancesOperations, FindAndMutate, Intervals},
+};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
 pub struct GenericBalance {
@@ -179,6 +182,8 @@ pub struct Task {
     /// NOTE: Only tally native balance here, manager can maintain token/balances outside of tasks
     pub total_deposit: Vec<Coin>,
 
+    pub total_cw20_deposit: Vec<Cw20CoinVerified>,
+
     /// The cosmos message to call, if time or rules are met
     pub actions: Vec<Action>,
     /// A prioritized list of messages that can be chained decision matrix
@@ -215,6 +220,64 @@ impl Task {
             })
     }
 
+    pub fn task_cw20_balance_uses(
+        &self,
+        api: &dyn Api,
+    ) -> Result<Vec<Cw20CoinVerified>, CoreError> {
+        let mut balance = vec![];
+        for action in &self.actions {
+            if let CosmosMsg::Wasm(WasmMsg::Execute {
+                msg, contract_addr, ..
+            }) = &action.msg
+            {
+                if let Ok(cw20_msg) = cosmwasm_std::from_binary(msg) {
+                    match cw20_msg {
+                        Cw20ExecuteMsg::Send { amount, .. } => {
+                            balance.checked_add_coins(&[Cw20CoinVerified {
+                                address: api.addr_validate(contract_addr)?,
+                                amount,
+                            }])?
+                        }
+                        Cw20ExecuteMsg::Transfer { amount, .. } => {
+                            balance.checked_add_coins(&[Cw20CoinVerified {
+                                address: api.addr_validate(contract_addr)?,
+                                amount,
+                            }])?
+                        }
+                        _ => return Err(CoreError::InvalidWasmMsg {}),
+                    }
+                }
+            }
+        }
+        Ok(balance)
+    }
+
+    pub fn verify_enough_cw20_balances(
+        &self,
+        task_cw20_balance_uses: &[Cw20CoinVerified],
+    ) -> Result<(), CoreError> {
+        for coin in task_cw20_balance_uses {
+            if let Some(balance) = self
+                .total_cw20_deposit
+                .iter()
+                .find(|balance| balance.address == coin.address)
+            {
+                if balance.amount < coin.amount {
+                    return Err(CoreError::NotEnoughCw20 {
+                        addr: balance.address.to_string(),
+                        lack: balance.amount - coin.amount,
+                    });
+                }
+            } else {
+                return Err(CoreError::NotEnoughCw20 {
+                    addr: coin.address.to_string(),
+                    lack: coin.amount,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn is_recurring(&self) -> bool {
         matches!(&self.interval, Interval::Cron(_) | Interval::Block(_))
     }
@@ -237,16 +300,23 @@ impl Task {
         let mut valid = true;
 
         for action in self.actions.iter() {
-            match action.clone().msg {
+            match &action.msg {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr,
                     funds: _,
-                    msg: _,
+                    msg,
                 }) => {
                     // TODO: Is there any way sender can be "self" creating a malicious task?
                     // cannot be THIS contract id, unless predecessor is owner of THIS contract
-                    if &contract_addr == self_addr && sender != owner_id {
+                    if contract_addr == self_addr && sender != owner_id {
                         valid = false;
+                    }
+                    if let Ok(cw20_msg) = cosmwasm_std::from_binary(msg) {
+                        match cw20_msg {
+                            Cw20ExecuteMsg::Send { .. } => (),
+                            Cw20ExecuteMsg::Transfer { .. } => (),
+                            _ => valid = false,
+                        }
                     }
                 }
                 // TODO: Allow send, as long as coverage of assets is correctly handled
@@ -307,81 +377,120 @@ impl Task {
     }
 }
 
-impl GenericBalance {
-    pub fn checked_add_native(&mut self, add: &[Coin]) -> Result<(), CoreError> {
-        for add_token in add {
-            let token = self
-                .native
-                .iter_mut()
-                .find(|exist| exist.denom == add_token.denom);
-            match token {
-                Some(exist) => {
-                    exist.amount = exist
-                        .amount
-                        .checked_add(add_token.amount)
-                        .map_err(StdError::overflow)?
-                }
-                None => self.native.push(add_token.clone()),
+impl FindAndMutate<'_, Coin> for Vec<Coin> {
+    fn find_checked_add(&mut self, add: &Coin) -> Result<(), CoreError> {
+        let token = self.iter_mut().find(|exist| exist.denom == add.denom);
+        match token {
+            Some(exist) => {
+                exist.amount = exist
+                    .amount
+                    .checked_add(add.amount)
+                    .map_err(StdError::overflow)?
             }
+            None => self.push(add.clone()),
         }
         Ok(())
+    }
+
+    fn find_checked_sub(&mut self, sub: &Coin) -> Result<(), CoreError> {
+        let coin = self.iter().position(|exist| exist.denom == sub.denom);
+        match coin {
+            Some(exist) => {
+                match self[exist].amount.cmp(&sub.amount) {
+                    std::cmp::Ordering::Less => {
+                        return Err(CoreError::Std(StdError::overflow(OverflowError::new(
+                            Sub,
+                            self[exist].amount,
+                            sub.amount,
+                        ))))
+                    }
+                    std::cmp::Ordering::Equal => {
+                        self.swap_remove(exist);
+                    }
+                    std::cmp::Ordering::Greater => self[exist].amount -= sub.amount,
+                };
+                Ok(())
+            }
+            None => Err(CoreError::EmptyBalance {}),
+        }
+    }
+}
+
+impl FindAndMutate<'_, Cw20CoinVerified> for Vec<Cw20CoinVerified> {
+    fn find_checked_add(&mut self, add: &Cw20CoinVerified) -> Result<(), CoreError> {
+        let token = self.iter_mut().find(|exist| exist.address == add.address);
+        match token {
+            Some(exist) => {
+                exist.amount = exist
+                    .amount
+                    .checked_add(add.amount)
+                    .map_err(StdError::overflow)?
+            }
+            None => self.push(add.clone()),
+        }
+        Ok(())
+    }
+
+    fn find_checked_sub(&mut self, sub: &Cw20CoinVerified) -> Result<(), CoreError> {
+        let coin_p = self.iter().position(|exist| exist.address == sub.address);
+        match coin_p {
+            Some(exist) => {
+                match self[exist].amount.cmp(&sub.amount) {
+                    std::cmp::Ordering::Less => {
+                        return Err(CoreError::Std(StdError::overflow(OverflowError::new(
+                            Sub,
+                            self[exist].amount,
+                            sub.amount,
+                        ))))
+                    }
+                    std::cmp::Ordering::Equal => {
+                        self.swap_remove(exist);
+                    }
+                    std::cmp::Ordering::Greater => self[exist].amount -= sub.amount,
+                };
+                Ok(())
+            }
+            None => Err(CoreError::EmptyBalance {}),
+        }
+    }
+}
+
+impl<'a, T, Rhs> BalancesOperations<'a, T, Rhs> for Vec<T>
+where
+    Rhs: IntoIterator<Item = &'a T>,
+    Self: FindAndMutate<'a, T>,
+    T: 'a,
+{
+    fn checked_add_coins(&mut self, add: Rhs) -> Result<(), CoreError> {
+        for add_token in add {
+            self.find_checked_add(add_token)?;
+        }
+        Ok(())
+    }
+
+    fn checked_sub_coins(&mut self, sub: Rhs) -> Result<(), CoreError> {
+        for sub_token in sub {
+            self.find_checked_sub(sub_token)?;
+        }
+        Ok(())
+    }
+}
+
+impl GenericBalance {
+    pub fn checked_add_native(&mut self, add: &[Coin]) -> Result<(), CoreError> {
+        self.native.checked_add_coins(add)
     }
 
     pub fn checked_add_cw20(&mut self, add: &[Cw20CoinVerified]) -> Result<(), CoreError> {
-        for add_token in add {
-            let token = self
-                .cw20
-                .iter_mut()
-                .find(|exist| exist.address == add_token.address);
-            match token {
-                Some(exist) => {
-                    exist.amount = exist
-                        .amount
-                        .checked_add(add_token.amount)
-                        .map_err(StdError::overflow)?
-                }
-                None => self.cw20.push(add_token.clone()),
-            }
-        }
-        Ok(())
+        self.cw20.checked_add_coins(add)
     }
 
     pub fn checked_sub_native(&mut self, sub: &[Coin]) -> Result<(), CoreError> {
-        for sub_token in sub {
-            let coin = self
-                .native
-                .iter_mut()
-                .find(|exist| exist.denom == sub_token.denom);
-            match coin {
-                Some(exist) => {
-                    exist.amount = exist
-                        .amount
-                        .checked_sub(sub_token.amount)
-                        .map_err(StdError::overflow)?
-                }
-                None => return Err(CoreError::EmptyBalance {}),
-            }
-        }
-        Ok(())
+        self.native.checked_sub_coins(sub)
     }
 
     pub fn checked_sub_cw20(&mut self, sub: &[Cw20CoinVerified]) -> Result<(), CoreError> {
-        for sub_token in sub {
-            let cw20 = self
-                .cw20
-                .iter_mut()
-                .find(|exist| exist.address == sub_token.address);
-            match cw20 {
-                Some(coin) => {
-                    coin.amount = coin
-                        .amount
-                        .checked_sub(sub_token.amount)
-                        .map_err(StdError::overflow)?
-                }
-                None => return Err(CoreError::EmptyBalance {}),
-            }
-        }
-        Ok(())
+        self.cw20.checked_sub_coins(sub)
     }
 }
 
@@ -504,6 +613,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "alice".to_string(),
@@ -537,6 +647,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "alice".to_string(),
@@ -570,6 +681,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "alice".to_string(),
@@ -604,6 +716,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "alice".to_string(),
@@ -638,6 +751,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Gov(GovMsg::Vote {
                     proposal_id: 0,
@@ -671,6 +785,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Ibc(IbcMsg::Transfer {
                     channel_id: "id".to_string(),
@@ -706,6 +821,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Bank(BankMsg::Burn {
                     amount: vec![Coin::new(10, "coin")],
@@ -738,6 +854,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Bank(BankMsg::Send {
                     to_address: "address".to_string(),
@@ -782,6 +899,7 @@ mod tests {
                 contract_addr: Addr::unchecked("foo"),
                 msg: Binary("bar".into()),
             }]),
+            total_cw20_deposit: vec![],
         };
         assert!(task.is_valid_msg(
             &Addr::unchecked("alice"),
@@ -961,6 +1079,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: Default::default(),
+            total_cw20_deposit: Default::default(),
             actions: vec![Action {
                 msg: CosmosMsg::Wasm(WasmMsg::ClearAdmin {
                     contract_addr: "alice".to_string(),

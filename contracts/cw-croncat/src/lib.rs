@@ -5,6 +5,7 @@ mod error;
 pub mod helpers;
 pub mod manager;
 pub mod owner;
+pub mod receiver;
 pub mod slots;
 pub mod state;
 pub mod tasks;

@@ -34,7 +34,6 @@ cw-storage-plus = "0.13"
 cron_schedule = "0.2.0"
 cw2 = "0.13"
 cw20 = { version = "0.12.1" }
-cw20-base = { version = "0.12.1", features = ["library"] }
 schemars = "0.8"
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0" }

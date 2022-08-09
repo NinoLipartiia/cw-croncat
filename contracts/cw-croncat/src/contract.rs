@@ -137,9 +137,17 @@ impl<'a> CwCroncat<'a> {
             ExecuteMsg::CheckInAgent {} => self.accept_nomination_agent(deps, info, env),
 
             ExecuteMsg::CreateTask { task } => self.create_task(deps, info, env, task),
-            ExecuteMsg::RemoveTask { task_hash } => self.remove_task(deps, task_hash),
+            ExecuteMsg::RemoveTask { task_hash } => self.remove_task(deps.storage, task_hash),
             ExecuteMsg::RefillTaskBalance { task_hash } => self.refill_task(deps, info, task_hash),
+            ExecuteMsg::RefillTaskCw20Balance {
+                task_hash,
+                cw20_coins,
+            } => self.refill_task_cw20(deps, info, task_hash, cw20_coins),
             ExecuteMsg::ProxyCall {} => self.proxy_call(deps, info, env),
+            ExecuteMsg::Receive(msg) => self.receive_cw20(deps, info, msg),
+            ExecuteMsg::WithdrawWalletBalance {
+                cw20_amounts: cw20_balances,
+            } => self.withdraw_wallet_balances(deps, info, cw20_balances),
         }
     }
 
@@ -169,6 +177,9 @@ impl<'a> CwCroncat<'a> {
             }
             QueryMsg::GetSlotHashes { slot } => to_binary(&self.query_slot_tasks(deps, slot)?),
             QueryMsg::GetSlotIds {} => to_binary(&self.query_slot_ids(deps)?),
+            QueryMsg::GetWalletBalances { wallet } => {
+                to_binary(&self.query_wallet_balances(deps, wallet)?)
+            }
         }
     }
 
@@ -187,7 +198,14 @@ impl<'a> CwCroncat<'a> {
         // If contract_addr matches THIS contract, it is the proxy callback
         // proxy_callback is also responsible for handling reply modes: "handle_failure", "handle_success"
         if item.contract_addr.is_some() && item.contract_addr.unwrap() == env.contract.address {
-            return self.proxy_callback(deps, env, msg, item.task_hash.unwrap());
+            return self.proxy_callback(
+                deps,
+                env,
+                msg,
+                item.task_hash.unwrap(),
+                item.task_is_extra.unwrap(),
+                item.agent_id.unwrap(),
+            );
         }
 
         // NOTE: Currently only handling proxy callbacks
@@ -209,7 +227,7 @@ mod tests {
     };
     use cw_croncat_core::msg::{GetConfigResponse, QueryMsg};
     use cw_croncat_core::types::SlotType;
-
+    const AGENT0: &str = "cosmos1a7uhnpqthunr2rzj0ww0hwurpn42wyun6c5puz";
     #[test]
     fn configure() {
         let mut deps = mock_dependencies_with_balance(&coins(200, ""));
@@ -282,6 +300,8 @@ mod tests {
                     prev_idx: None,
                     task_hash: Some(task_hash.clone()),
                     contract_addr: None,
+                    task_is_extra: Some(false),
+                    agent_id: Some(Addr::unchecked(AGENT0)),
                 },
             )
             .unwrap();
@@ -314,6 +334,8 @@ mod tests {
                     prev_idx: None,
                     task_hash: Some(task_hash),
                     contract_addr: Some(Addr::unchecked(MOCK_CONTRACT_ADDR)),
+                    task_is_extra: Some(false),
+                    agent_id: Some(Addr::unchecked(AGENT0)),
                 },
             )
             .unwrap();

@@ -1,3 +1,4 @@
+use crate::balancer::Balancer;
 use crate::error::ContractError;
 use crate::helpers::{send_tokens, GenericBalance};
 use crate::state::{Config, CwCroncat};
@@ -377,7 +378,15 @@ impl<'a> CwCroncat<'a> {
             .may_load(deps.storage)?
             .unwrap_or_default();
         if let Some(index) = active_agents.iter().position(|addr| *addr == agent_id) {
+            //Notify the balancer agent has been removed, to rebalance itself
+            self.balancer.on_agent_unregister(
+                deps.storage,
+                &self.config,
+                &self.agent_active_queue,
+                agent_id.clone(),
+            );
             active_agents.remove(index);
+
             self.agent_active_queue.save(deps.storage, &active_agents)?;
         } else {
             // Agent can't be both in active and pending vector
@@ -525,6 +534,7 @@ mod tests {
                         gas_limit: Some(150_000),
                     }],
                     rules: None,
+                    cw20_coins: vec![],
                 },
             },
             send_funds.as_ref(),
@@ -556,6 +566,7 @@ mod tests {
                         gas_limit: Some(150_000),
                     }],
                     rules: None,
+                    cw20_coins: vec![],
                 },
             },
             send_funds.as_ref(),
@@ -587,6 +598,7 @@ mod tests {
                         gas_limit: Some(150_000),
                     }],
                     rules: None,
+                    cw20_coins: vec![],
                 },
             },
             send_funds.as_ref(),
@@ -619,6 +631,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         )
     }

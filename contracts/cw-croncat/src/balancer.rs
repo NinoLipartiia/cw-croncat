@@ -1,6 +1,7 @@
 use crate::helpers::*;
-use crate::state::Config;
+use crate::state::{Config, TaskInfo};
 use crate::ContractError::AgentNotRegistered;
+use cosmwasm_std::Storage;
 use cosmwasm_std::{Addr, Env, StdError, StdResult};
 use cosmwasm_std::{DepsMut, Uint64};
 use cw_croncat_core::msg::AgentTaskResponse;
@@ -15,13 +16,28 @@ pub enum BalancerMode {
 pub trait Balancer<'a> {
     fn get_agent_tasks(
         &mut self,
-        deps: DepsMut,
-        env: Env,
+        deps: &DepsMut,
+        env: &Env,
         config: &Item<'a, Config>,
         active_agents: &Item<'a, Vec<Addr>>,
         agent_id: Addr,
         slot_items: (Option<u64>, Option<u64>),
     ) -> StdResult<Option<AgentTaskResponse>>;
+    fn on_agent_unregister(
+        &self,
+        storage: &'a mut dyn Storage,
+        config: &Item<'a, Config>,
+        active_agents: &Item<'a, Vec<Addr>>,
+        agent_id: Addr,
+    );
+    fn on_task_completed(
+        &self,
+        storage: &'a mut dyn Storage,
+        _env: &Env,
+        config: &Item<'a, Config>,
+        active_agents: &Item<'a, Vec<Addr>>,
+        task_info: TaskInfo,
+    );
 }
 
 pub struct RoundRobinBalancer {
@@ -35,29 +51,45 @@ impl RoundRobinBalancer {
     pub fn new(mode: BalancerMode) -> RoundRobinBalancer {
         RoundRobinBalancer { mode }
     }
-    // fn update_or_append(
-    //     &self,
-    //     overflows: &mut Vec<(SlotType, u32, u32)>,
-    //     value: (SlotType, u32, u32),
-    // ) {
-    //     match overflows
-    //         .iter_mut()
-    //         .find(|p| p.0 == value.0 && p.1 == value.1)
-    //     {
-    //         Some(found) => {
-    //             found.2 += value.2;
-    //         }
-    //         None => {
-    //             overflows.push(value);
-    //         }
-    //     }
-    // }
+    fn update_or_append(
+        &self,
+        overflows: &mut Vec<(SlotType, u32, u32)>,
+        value: (SlotType, u32, u32),
+    ) {
+        match overflows
+            .iter_mut()
+            .find(|p| p.0 == value.0 && p.1 == value.1)
+        {
+            Some(found) => {
+                found.2 += value.2;
+            }
+            None => {
+                overflows.push(value);
+            }
+        }
+    }
+    fn remove_agent_and_rebalance(
+        &self,
+        indices: &mut Vec<(SlotType, u32, u32)>,
+        agent_index: u32,
+    ) {
+        indices.clear();
+        let mut vec: Vec<(SlotType, u32, u32)> = Vec::new();
+        for p in indices.iter() {
+            match agent_index {
+                aind if aind < p.1 => vec.push((p.0.clone(), p.1 - 1, p.2)),
+                aind if aind > p.1 => vec.push((p.0.clone(), p.1, p.2)),
+                _ => (),
+            }
+        }
+        indices.extend(vec);
+    }
 }
 impl<'a> Balancer<'a> for RoundRobinBalancer {
     fn get_agent_tasks(
         &mut self,
-        deps: DepsMut,
-        _env: Env,
+        deps: &DepsMut,
+        _env: &Env,
         config: &Item<'a, Config>,
         active_agents: &Item<'a, Vec<Addr>>,
         agent_id: Addr,
@@ -76,7 +108,7 @@ impl<'a> Balancer<'a> for RoundRobinBalancer {
         let agent_index = active
             .iter()
             .position(|x| x == &agent_id)
-            .expect("Agent not active or not registered!") as u64;
+            .expect("Agent is not active or not registered!") as u64;
 
         if slot_items == (None, None) {
             return Ok(None);
@@ -117,7 +149,7 @@ impl<'a> Balancer<'a> for RoundRobinBalancer {
                         let agent_index = diff
                             .iter()
                             .position(|x| x == &(agent_index as usize))
-                            .expect("Agent not active or not registered!")
+                            .expect("Agent is not active or not registered!")
                             as u64;
 
                         let mut extra = 0u64;
@@ -152,6 +184,52 @@ impl<'a> Balancer<'a> for RoundRobinBalancer {
             }
             BalancerMode::Equalizer => todo!(),
         }
+    }
+
+    fn on_agent_unregister(
+        &self,
+        storage: &'a mut dyn Storage,
+        config: &Item<'a, Config>,
+        active_agents: &Item<'a, Vec<Addr>>,
+        agent_id: Addr,
+    ) {
+        let mut conf: Config = config.load(storage).unwrap();
+        let indices = conf.agent_active_indices.as_mut();
+        let active = active_agents.load(storage).unwrap();
+        let agent_index = active
+            .iter()
+            .position(|x| x == &agent_id)
+            .expect("Agent is not active or not registered!") as u32;
+
+        self.remove_agent_and_rebalance(indices, agent_index);
+
+        config.save(storage, &conf).unwrap();
+    }
+
+    fn on_task_completed(
+        &self,
+        storage: &'a mut dyn Storage,
+        _env: &Env,
+        config: &Item<'a, Config>,
+        active_agents: &Item<'a, Vec<Addr>>,
+        task_info: TaskInfo,
+    ) {
+        if !task_info.task_is_extra.unwrap_or(false) {
+            return;
+        };
+
+        let mut conf: Config = config.load(storage).unwrap();
+        let indices = conf.agent_active_indices.as_mut();
+        let active = active_agents.load(storage).unwrap();
+        let agent_id = task_info.agent_id.unwrap();
+        let slot_kind = task_info.slot_kind;
+        let agent_index = active
+            .iter()
+            .position(|x| x == &agent_id)
+            .expect("Agent is not active or not registered!") as u32;
+
+        self.update_or_append(indices, (slot_kind, agent_index, 1));
+        config.save(storage, &conf).unwrap();
     }
 }
 
@@ -232,8 +310,8 @@ mod tests {
         let slot: (Option<u64>, Option<u64>) = (Some(1), Some(2));
         let result = balancer
             .get_agent_tasks(
-                deps.as_mut(),
-                env.clone(),
+                &deps.as_mut(),
+                &env.clone(),
                 &store.config,
                 &store.agent_active_queue,
                 Addr::unchecked(AGENT0),
@@ -248,8 +326,8 @@ mod tests {
         let slot: (Option<u64>, Option<u64>) = (Some(100), Some(50));
         let result = balancer
             .get_agent_tasks(
-                deps.as_mut(),
-                env.clone(),
+                &deps.as_mut(),
+                &env.clone(),
                 &store.config,
                 &store.agent_active_queue,
                 Addr::unchecked(AGENT0),
@@ -264,8 +342,8 @@ mod tests {
         let slot: (Option<u64>, Option<u64>) = (Some(0), Some(0));
         let result = balancer
             .get_agent_tasks(
-                deps.as_mut(),
-                env.clone(),
+                &deps.as_mut(),
+                &env.clone(),
                 &store.config,
                 &store.agent_active_queue,
                 Addr::unchecked(AGENT0),
@@ -309,8 +387,8 @@ mod tests {
         let slot: (Option<u64>, Option<u64>) = (Some(7), Some(7));
         let result = balancer
             .get_agent_tasks(
-                deps.as_mut(),
-                env.clone(),
+                &deps.as_mut(),
+                &env.clone(),
                 &store.config,
                 &store.agent_active_queue,
                 Addr::unchecked(AGENT0),
@@ -327,8 +405,8 @@ mod tests {
         //Verify agent1 gets extra
         let result = balancer
             .get_agent_tasks(
-                deps.as_mut(),
-                env.clone(),
+                &deps.as_mut(),
+                &env.clone(),
                 &store.config,
                 &store.agent_active_queue,
                 Addr::unchecked(AGENT1),
@@ -345,8 +423,8 @@ mod tests {
         //Verify agent3 not getting extra
         let result = balancer
             .get_agent_tasks(
-                deps.as_mut(),
-                env.clone(),
+                &deps.as_mut(),
+                &env.clone(),
                 &store.config,
                 &store.agent_active_queue,
                 Addr::unchecked(AGENT3),
@@ -360,7 +438,94 @@ mod tests {
         assert_eq!(result.num_block_tasks_extra.u64(), 0);
         assert_eq!(result.num_cron_tasks_extra.u64(), 0);
     }
+    #[test]
+    fn test_on_task_completed() {
+        let store = CwCroncat::default();
+        let mut deps = mock_dependencies_with_balance(&coins(200, NATIVE_DENOM));
+        let env = mock_env();
+        let balancer = RoundRobinBalancer::default();
+        let mut config = mock_config();
 
-    fn test_rebalance_agent_removal() {}
-    fn test_rebalance_agent_gets_extra() {}
+        store.config.save(&mut deps.storage, &config).unwrap();
+
+        let mut active_agents: Vec<Addr> = store
+            .agent_active_queue
+            .may_load(&deps.storage)
+            .unwrap()
+            .unwrap_or_default();
+        active_agents.extend(vec![
+            Addr::unchecked(AGENT0),
+            Addr::unchecked(AGENT1),
+            Addr::unchecked(AGENT2),
+            Addr::unchecked(AGENT3),
+            Addr::unchecked(AGENT4),
+        ]);
+
+        store
+            .agent_active_queue
+            .save(&mut deps.storage, &active_agents)
+            .unwrap();
+
+        let task_info = TaskInfo {
+            task: None,
+            task_hash: "".as_bytes().to_vec(),
+            task_is_extra: Some(true),
+            agent_id: Some(Addr::unchecked(AGENT0)),
+            slot_kind: SlotType::Block,
+        };
+
+        balancer.update_or_append(&mut config.agent_active_indices, (SlotType::Block, 0, 10));
+        store.config.save(&mut deps.storage, &config).unwrap();
+        balancer.on_task_completed(
+            &mut deps.storage,
+            &env,
+            &store.config,
+            &store.agent_active_queue,
+            task_info,
+        );
+
+        config = store.config.load(&mut deps.storage).unwrap();
+        assert_eq!(config.agent_active_indices, vec![(SlotType::Block, 0, 11)])
+    }
+
+    #[test]
+    fn test_on_agent_unregister() {
+        let store = CwCroncat::default();
+        let mut deps = mock_dependencies_with_balance(&coins(200, NATIVE_DENOM));
+        let balancer = RoundRobinBalancer::default();
+        let mut config = mock_config();
+
+        store.config.save(&mut deps.storage, &config).unwrap();
+
+        let mut active_agents: Vec<Addr> = store
+            .agent_active_queue
+            .may_load(&deps.storage)
+            .unwrap()
+            .unwrap_or_default();
+        active_agents.extend(vec![
+            Addr::unchecked(AGENT0),
+            Addr::unchecked(AGENT1),
+            Addr::unchecked(AGENT2),
+            Addr::unchecked(AGENT3),
+            Addr::unchecked(AGENT4),
+        ]);
+
+        store
+            .agent_active_queue
+            .save(&mut deps.storage, &active_agents)
+            .unwrap();
+
+        balancer.update_or_append(&mut config.agent_active_indices, (SlotType::Block, 0, 1));
+        balancer.update_or_append(&mut config.agent_active_indices, (SlotType::Cron, 0, 1));
+        store.config.save(&mut deps.storage, &config).unwrap();
+        balancer.on_agent_unregister(
+            &mut deps.storage,
+            &store.config,
+            &store.agent_active_queue,
+            Addr::unchecked(AGENT0),
+        );
+
+        config = store.config.load(&mut deps.storage).unwrap();
+        assert_eq!(config.agent_active_indices, vec![])
+    }
 }

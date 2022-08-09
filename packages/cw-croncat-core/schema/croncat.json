@@ -131,6 +131,16 @@
         "$ref": "#/definitions/TaskResponse"
       }
     },
+    "GetWalletBalancesResponse": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GetWalletBalancesResponse"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "Task": {
       "anyOf": [
         {
@@ -577,6 +587,21 @@
         }
       ]
     },
+    "Cw20Coin": {
+      "type": "object",
+      "required": [
+        "address",
+        "amount"
+      ],
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
     "Cw20CoinVerified": {
       "type": "object",
       "required": [
@@ -844,6 +869,20 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0.0
+          }
+        }
+      }
+    },
+    "GetWalletBalancesResponse": {
+      "type": "object",
+      "required": [
+        "cw20_balances"
+      ],
+      "properties": {
+        "cw20_balances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20CoinVerified"
           }
         }
       }
@@ -1192,6 +1231,7 @@
         "interval",
         "owner_id",
         "stop_on_fail",
+        "total_cw20_deposit",
         "total_deposit"
       ],
       "properties": {
@@ -1238,6 +1278,12 @@
           "description": "Defines if this task can continue until balance runs out",
           "type": "boolean"
         },
+        "total_cw20_deposit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20CoinVerified"
+          }
+        },
         "total_deposit": {
           "description": "NOTE: Only tally native balance here, manager can maintain token/balances outside of tasks",
           "type": "array",
@@ -1251,6 +1297,7 @@
       "type": "object",
       "required": [
         "actions",
+        "cw20_coins",
         "interval",
         "stop_on_fail"
       ],
@@ -1270,6 +1317,12 @@
               "type": "null"
             }
           ]
+        },
+        "cw20_coins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20Coin"
+          }
         },
         "interval": {
           "$ref": "#/definitions/Interval"
@@ -1296,6 +1349,7 @@
         "owner_id",
         "stop_on_fail",
         "task_hash",
+        "total_cw20_deposit",
         "total_deposit"
       ],
       "properties": {
@@ -1335,6 +1389,12 @@
         },
         "task_hash": {
           "type": "string"
+        },
+        "total_cw20_deposit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Cw20CoinVerified"
+          }
         },
         "total_deposit": {
           "type": "array",

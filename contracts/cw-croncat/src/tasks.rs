@@ -1,12 +1,15 @@
 use crate::error::ContractError;
 use crate::slots::Interval;
 use crate::state::{Config, CwCroncat};
+use cosmwasm_std::Storage;
 use cosmwasm_std::{
-    coin, Addr, BankMsg, Coin, Deps, DepsMut, Env, MessageInfo, Order, Response, StdResult, SubMsg,
-    Uint128,
+    coin, to_binary, Addr, BankMsg, Coin, Deps, DepsMut, Env, MessageInfo, Order, Response,
+    StdResult, SubMsg, Uint128, WasmMsg,
 };
+use cw20::{Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg};
+use cw_croncat_core::error::CoreError;
 use cw_croncat_core::msg::{GetSlotHashesResponse, GetSlotIdsResponse, TaskRequest, TaskResponse};
-use cw_croncat_core::traits::Intervals;
+use cw_croncat_core::traits::{BalancesOperations, Intervals};
 use cw_croncat_core::types::{BoundaryValidated, SlotType, Task};
 
 impl<'a> CwCroncat<'a> {
@@ -187,6 +190,29 @@ impl<'a> CwCroncat<'a> {
         }
 
         let owner_id = info.sender;
+        let cw20 = if !task.cw20_coins.is_empty() {
+            let mut cw20: Vec<Cw20CoinVerified> = Vec::with_capacity(task.cw20_coins.len());
+            for coin in task.cw20_coins {
+                cw20.push(Cw20CoinVerified {
+                    address: deps.api.addr_validate(&coin.address)?,
+                    amount: coin.amount,
+                })
+            }
+            // update user balances
+            self.balances.update(
+                deps.storage,
+                &owner_id,
+                |balances| -> Result<_, ContractError> {
+                    let mut balances = balances.unwrap_or_default();
+
+                    balances.checked_sub_coins(&cw20)?;
+                    Ok(balances)
+                },
+            )?;
+            cw20
+        } else {
+            vec![]
+        };
         let boundary = BoundaryValidated::validate_boundary(task.boundary, &task.interval)?;
         let item = Task {
             funds_withdrawn_recurring: Uint128::zero(),
@@ -195,6 +221,7 @@ impl<'a> CwCroncat<'a> {
             boundary,
             stop_on_fail: task.stop_on_fail,
             total_deposit: info.funds.clone(),
+            total_cw20_deposit: cw20,
             actions: task.actions,
             rules: task.rules,
         };
@@ -231,7 +258,8 @@ impl<'a> CwCroncat<'a> {
                 ),
             });
         }
-
+        let task_cw20_balance_uses = item.task_cw20_balance_uses(deps.api)?;
+        item.verify_enough_cw20_balances(&task_cw20_balance_uses)?;
         let hash = item.to_hash();
 
         // Parse interval into a future timestamp, then convert to a slot
@@ -317,52 +345,48 @@ impl<'a> CwCroncat<'a> {
     }
 
     /// Deletes a task in its entirety, returning any remaining balance to task owner.
-    pub fn remove_task(&self, deps: DepsMut, task_hash: String) -> Result<Response, ContractError> {
+    pub fn remove_task(
+        &self,
+        storage: &mut dyn Storage,
+        task_hash: String,
+    ) -> Result<Response, ContractError> {
         let hash_vec = task_hash.clone().into_bytes();
-        let task_raw = self.tasks.may_load(deps.storage, hash_vec.clone())?;
-        if task_raw.is_none() {
-            return Err(ContractError::CustomError {
-                val: "No task found by hash".to_string(),
-            });
-        }
+        let task = self
+            .tasks
+            .may_load(storage, hash_vec.clone())?
+            .ok_or(ContractError::NoTaskFound {})?;
 
         // Remove all the thangs
-        self.tasks.remove(deps.storage, hash_vec)?;
+        self.tasks.remove(storage, hash_vec)?;
 
         // find any scheduled things and remove them!
         // check which type of slot it would be in, then iterate to remove
         // NOTE: def could use some spiffy refactor here
         let time_ids: Vec<u64> = self
             .time_slots
-            .keys(deps.storage, None, None, Order::Ascending)
+            .keys(storage, None, None, Order::Ascending)
             .collect::<StdResult<Vec<_>>>()?;
 
         for tid in time_ids {
-            let mut time_hashes = self
-                .time_slots
-                .may_load(deps.storage, tid)?
-                .unwrap_or_default();
+            let mut time_hashes = self.time_slots.may_load(storage, tid)?.unwrap_or_default();
             if !time_hashes.is_empty() {
                 time_hashes.retain(|h| String::from_utf8(h.to_vec()).unwrap() != task_hash.clone());
             }
 
             // save the updates, remove if slot no longer has hashes
             if time_hashes.is_empty() {
-                self.time_slots.remove(deps.storage, tid);
+                self.time_slots.remove(storage, tid);
             } else {
-                self.time_slots.save(deps.storage, tid, &time_hashes)?;
+                self.time_slots.save(storage, tid, &time_hashes)?;
             }
         }
         let block_ids: Vec<u64> = self
             .block_slots
-            .keys(deps.storage, None, None, Order::Ascending)
+            .keys(storage, None, None, Order::Ascending)
             .collect::<StdResult<Vec<_>>>()?;
 
         for bid in block_ids {
-            let mut block_hashes = self
-                .block_slots
-                .may_load(deps.storage, bid)?
-                .unwrap_or_default();
+            let mut block_hashes = self.block_slots.may_load(storage, bid)?.unwrap_or_default();
             if !block_hashes.is_empty() {
                 block_hashes
                     .retain(|h| String::from_utf8(h.to_vec()).unwrap() != task_hash.clone());
@@ -370,24 +394,33 @@ impl<'a> CwCroncat<'a> {
 
             // save the updates, remove if slot no longer has hashes
             if block_hashes.is_empty() {
-                self.block_slots.remove(deps.storage, bid);
+                self.block_slots.remove(storage, bid);
             } else {
-                self.block_slots.save(deps.storage, bid, &block_hashes)?;
+                self.block_slots.save(storage, bid, &block_hashes)?;
             }
         }
 
+        // return any remaining total_cw20_deposit to the owner
+        self.balances.update(
+            storage,
+            &task.owner_id,
+            |balances| -> Result<_, ContractError> {
+                let mut balances = balances.unwrap_or_default();
+                balances.checked_add_coins(&task.total_cw20_deposit)?;
+                Ok(balances)
+            },
+        )?;
         // setup sub-msgs for returning any remaining total_deposit to the owner
-        let task = task_raw.unwrap();
         let submsgs = SubMsg::new(BankMsg::Send {
             to_address: task.clone().owner_id.into(),
             amount: task.clone().total_deposit,
         });
 
         // remove from the total available_balance
-        let mut c: Config = self.config.load(deps.storage)?;
+        let mut c: Config = self.config.load(storage)?;
         c.available_balance
             .checked_sub_native(&task.total_deposit)?;
-        self.config.save(deps.storage, &c)?;
+        self.config.save(storage, &c)?;
 
         Ok(Response::new()
             .add_attribute("method", "remove_task")
@@ -405,15 +438,11 @@ impl<'a> CwCroncat<'a> {
         let hash_vec = task_hash.into_bytes();
         let task_raw = self.tasks.may_load(deps.storage, hash_vec.clone())?;
         if task_raw.is_none() {
-            return Err(ContractError::CustomError {
-                val: "Task doesnt exist".to_string(),
-            });
+            return Err(ContractError::NoTaskFound {});
         }
         let mut task: Task = task_raw.unwrap();
         if task.owner_id != info.sender {
-            return Err(ContractError::CustomError {
-                val: "Only owner can refill their task".to_string(),
-            });
+            return Err(ContractError::RefillNotTaskOwner {});
         }
 
         // Add the attached balance into available_balance
@@ -443,10 +472,124 @@ impl<'a> CwCroncat<'a> {
         })?;
 
         // return the task total
-        let coins_total: String = task.total_deposit.iter().map(|a| a.to_string()).collect();
+        let coins_total: Vec<String> = task.total_deposit.iter().map(ToString::to_string).collect();
         Ok(Response::new()
             .add_attribute("method", "refill_task")
-            .add_attribute("total_deposit", coins_total))
+            .add_attribute("total_deposit", format!("{coins_total:?}")))
+    }
+
+    /// Refill a task with more cw20 balance from user `balance` to continue its execution
+    /// NOTE: Restricting this to owner only, so owner can make sure the task ends
+    pub fn refill_task_cw20(
+        &self,
+        deps: DepsMut,
+        info: MessageInfo,
+        task_hash: String,
+        cw20_coins: Vec<Cw20Coin>,
+    ) -> Result<Response, ContractError> {
+        let task_hash = task_hash.into_bytes();
+        let cw20_coins_validated = {
+            let mut validated = Vec::with_capacity(cw20_coins.len());
+            for coin in cw20_coins {
+                validated.push(Cw20CoinVerified {
+                    address: deps.api.addr_validate(&coin.address)?,
+                    amount: coin.amount,
+                })
+            }
+            validated
+        };
+        let task = self.tasks.update(deps.storage, task_hash, |task| {
+            let mut task = task.ok_or(ContractError::NoTaskFound {})?;
+            if task.owner_id != info.sender {
+                return Err(ContractError::RefillNotTaskOwner {});
+            }
+            // add amount or create with this amount cw20 coins
+            task.total_cw20_deposit
+                .checked_add_coins(&cw20_coins_validated)?;
+            Ok(task)
+        })?;
+
+        // update user balances
+        self.balances.update(
+            deps.storage,
+            &info.sender,
+            |balances| -> Result<_, ContractError> {
+                let mut balances = balances.unwrap_or_default();
+                balances.checked_sub_coins(&cw20_coins_validated)?;
+                Ok(balances)
+            },
+        )?;
+
+        // used `update` here to not clone task_hash
+
+        let total_cw20_string: Vec<String> = task
+            .total_cw20_deposit
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
+        Ok(Response::new()
+            .add_attribute("method", "refill_task_cw20")
+            .add_attribute("total_cw20_deposit", format!("{total_cw20_string:?}")))
+    }
+
+    /// Let users withdraw their balances
+    pub fn withdraw_wallet_balances(
+        &self,
+        deps: DepsMut,
+        info: MessageInfo,
+        cw20_amounts: Vec<Cw20Coin>,
+    ) -> Result<Response, ContractError> {
+        let wallet = info.sender;
+        let withdraws: Vec<Cw20CoinVerified> = {
+            let mut withdraws = Vec::with_capacity(cw20_amounts.len());
+            for balance in cw20_amounts {
+                withdraws.push(Cw20CoinVerified {
+                    address: deps.api.addr_validate(&balance.address)?,
+                    amount: balance.amount,
+                });
+            }
+            withdraws
+        };
+
+        // update user and croncat manager balances
+        let new_balances = self.balances.update(
+            deps.storage,
+            &wallet,
+            |balances| -> Result<_, ContractError> {
+                let mut balances =
+                    balances.ok_or(ContractError::CoreError(CoreError::EmptyBalance {}))?;
+                balances.checked_sub_coins(&withdraws)?;
+                Ok(balances)
+            },
+        )?;
+        self.config
+            .update(deps.storage, |mut c| -> Result<_, ContractError> {
+                c.available_balance.checked_sub_cw20(&withdraws)?;
+                Ok(c)
+            })?;
+
+        let msgs = {
+            let mut msgs = Vec::with_capacity(withdraws.len());
+            for wd in withdraws {
+                msgs.push(WasmMsg::Execute {
+                    contract_addr: wd.address.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: wallet.to_string(),
+                        amount: wd.amount,
+                    })?,
+                    funds: vec![],
+                });
+            }
+            msgs
+        };
+
+        let new_balances_string: Vec<String> =
+            new_balances.iter().map(ToString::to_string).collect();
+        Ok(Response::new()
+            .add_attribute("method", "withdraw_wallet_balances")
+            .add_attribute("total_cw20_deposit", format!("{new_balances_string:?}"))
+            .add_messages(msgs))
     }
 }
 
@@ -540,6 +683,7 @@ mod tests {
             },
             stop_on_fail: false,
             total_deposit: coins(37, "atom"),
+            total_cw20_deposit: vec![],
             actions: vec![Action {
                 msg,
                 gas_limit: Some(150_000),
@@ -608,6 +752,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
 
@@ -668,6 +813,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
 
@@ -817,6 +963,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
         // let task_id_str = "95c916a53fa9d26deef094f7e1ee31c00a2d47b8bf474b2e06d39aebfb1fecc7".to_string();
@@ -910,6 +1057,7 @@ mod tests {
                             gas_limit: Some(150_000),
                         }],
                         rules: None,
+                        cw20_coins: vec![],
                     },
                 },
                 &coins(13, "atom"),
@@ -937,6 +1085,7 @@ mod tests {
                             gas_limit: Some(150_000),
                         }],
                         rules: None,
+                        cw20_coins: vec![],
                     },
                 },
                 &coins(13, "atom"),
@@ -990,6 +1139,7 @@ mod tests {
                             gas_limit: Some(150_000),
                         }],
                         rules: None,
+                        cw20_coins: vec![],
                     },
                 },
                 &coins(300010, "atom"),
@@ -1027,6 +1177,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
         let task_id_str =
@@ -1118,6 +1269,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
         let task_id_str =
@@ -1181,7 +1333,7 @@ mod tests {
             .wrap()
             .query_wasm_smart(&contract_addr.clone(), &QueryMsg::GetBalances {})
             .unwrap();
-        assert_eq!(coins(0, "atom"), balances.available_balance.native);
+        assert_eq!(balances.available_balance.native, vec![]);
 
         // Check the slots correctly removed the task
         let slot_ids: GetSlotIdsResponse = app
@@ -1215,6 +1367,7 @@ mod tests {
                     gas_limit: Some(150_000),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
         let task_id_str =
@@ -1243,7 +1396,7 @@ mod tests {
         let mut matches_new_totals: bool = false;
         for e in res.events {
             for a in e.attributes {
-                if a.key == "total_deposit" && a.value == "300013atom".to_string() {
+                if a.key == "total_deposit" && a.value == r#"["300013atom"]"#.to_string() {
                     matches_new_totals = true;
                 }
             }
@@ -1299,6 +1452,7 @@ mod tests {
                     gas_limit: Some(gas_limit),
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
         // create 1 token off task
@@ -1343,6 +1497,7 @@ mod tests {
                     gas_limit: None,
                 }],
                 rules: None,
+                cw20_coins: vec![],
             },
         };
         // create 1 token off task

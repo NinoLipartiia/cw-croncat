@@ -8,7 +8,9 @@ use cosmwasm_std::{
     StdResult, SubMsg, WasmMsg,
 };
 use cw20::{Balance, Cw20ExecuteMsg};
-use cw_croncat_core::msg::{ExecuteMsg, GetBalancesResponse, GetConfigResponse};
+use cw_croncat_core::msg::{
+    ExecuteMsg, GetBalancesResponse, GetConfigResponse, GetWalletBalancesResponse,
+};
 
 impl<'a> CwCroncat<'a> {
     pub(crate) fn query_config(&self, deps: Deps) -> StdResult<GetConfigResponse> {
@@ -35,6 +37,19 @@ impl<'a> CwCroncat<'a> {
             available_balance: c.available_balance,
             staked_balance: c.staked_balance,
             cw20_whitelist: c.cw20_whitelist,
+        })
+    }
+
+    /// Returns user cw20 balances locked inside this contract
+    pub(crate) fn query_wallet_balances(
+        &self,
+        deps: Deps,
+        wallet: String,
+    ) -> StdResult<GetWalletBalancesResponse> {
+        let addr = deps.api.addr_validate(&wallet)?;
+        let balances = self.balances.may_load(deps.storage, &addr)?;
+        Ok(GetWalletBalancesResponse {
+            cw20_balances: balances.unwrap_or_default(),
         })
     }
 

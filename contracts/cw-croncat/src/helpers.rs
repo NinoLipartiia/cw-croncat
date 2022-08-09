@@ -1,4 +1,8 @@
 use crate::state::Config;
+// use cosmwasm_std::Binary;
+// use cosmwasm_std::StdError;
+// use thiserror::Error;
+
 use crate::ContractError::AgentNotRegistered;
 use crate::{ContractError, CwCroncat};
 use cosmwasm_std::{
@@ -80,9 +84,11 @@ pub(crate) fn has_cw_coins(coins: &[Cw20CoinVerified], required: &Cw20CoinVerifi
         .map(|m| m.amount >= required.amount)
         .unwrap_or(false)
 }
+
 pub trait ReplyMsgParser {
     fn transferred_bank_tokens(&self) -> Vec<cosmwasm_std::Coin>;
 }
+
 impl ReplyMsgParser for cosmwasm_std::Reply {
     fn transferred_bank_tokens(&self) -> Vec<cosmwasm_std::Coin> {
         if let SubMsgResult::Ok(res) = &self.result {
