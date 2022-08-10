@@ -63,10 +63,10 @@ CONTRACT=$(junod query wasm list-contract-by-code $CODE_ID $NODE --output json |
 ## Tasks
 Here `USER` creates two tasks:
 ```bash
-STAKE='{"create_task":{"task":{"interval":"Immediate","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"10000"}}}},"gas_limit":150000}],"rules":null}}}'
+STAKE='{"create_task":{"task":{"interval":"Immediate","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"10000"}}}},"gas_limit":150000}],"rules":null,"cw20_coins":[]}}}'
 junod tx wasm execute $CONTRACT "$STAKE" --amount 500000ujunox --from $USER $TXFLAG -y
 
-STAKE2='{"create_task":{"task":{"interval":"Immediate","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"20000"}}}},"gas_limit":150000}],"rules":null}}}'
+STAKE2='{"create_task":{"task":{"interval":"Immediate","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"20000"}}}},"gas_limit":150000}],"rules":null,"cw20_coins":[]}}}'
 junod tx wasm execute $CONTRACT "$STAKE2" --amount 500000ujunox --from $USER $TXFLAG -y
 ```
 `USER` can refill the second task:
@@ -114,7 +114,7 @@ REGISTER_AGENT='{"register_agent":{}}'
 junod tx wasm execute $CONTRACT "$REGISTER_AGENT" --from $OWNER $TXFLAG -y
 junod tx wasm execute $CONTRACT "$REGISTER_AGENT" --from $USER $TXFLAG -y
 
-STAKE3='{"create_task":{"task":{"interval":"Immediate","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"300000"}}}},"gas_limit":150000}],"rules":null}}}'
+STAKE3='{"create_task":{"task":{"interval":"Immediate","boundary":null,"stop_on_fail":false,"actions":[{"msg":{"staking":{"delegate":{"validator":"juno14vhcdsyf83ngsrrqc92kmw8q9xakqjm0ff2dpn","amount":{"denom":"ujunox","amount":"300000"}}}},"gas_limit":150000}],"rules":null,"cw20_coins":[]}}}'
 junod tx wasm execute $CONTRACT "$STAKE3" --amount 500000ujunox --from $USER $TXFLAG -y
 
 CHECK_IN_AGENT='{"check_in_agent":{}}'
