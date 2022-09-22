@@ -376,8 +376,7 @@ impl Task {
                     if amount.amount.is_zero() {
                         valid = false;
                     }
-                    let add = vec![amount.clone()];
-                    amount_for_one_task.checked_add_native(&add)?;
+                    amount_for_one_task.native.find_checked_add(amount)?;
                 }
                 // TODO: Allow send, as long as coverage of assets is correctly handled
                 CosmosMsg::Bank(BankMsg::Send {
