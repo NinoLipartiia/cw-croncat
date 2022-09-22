@@ -909,7 +909,7 @@ mod tests {
                 Addr::unchecked(VERY_RICH),
                 contract_addr.clone(),
                 &new_msg(amount),
-                &coins(300010, "atom"),
+                &coins(300000 + 2 * amount, "atom"),
             )
             .unwrap();
         }
@@ -1729,7 +1729,7 @@ mod tests {
             },
         };
         // create 1 token off task
-        let amount_for_one_task = gas_limit;
+        let amount_for_one_task = gas_limit + 3;
         let res: ContractError = app
             .execute_contract(
                 Addr::unchecked(ANYONE),
@@ -1783,7 +1783,8 @@ mod tests {
             },
         };
         // create 1 token off task
-        let amount_for_one_task = gas_limit;
+        // for one task need gas + staking amount
+        let amount_for_one_task = gas_limit + 3;
         let res: ContractError = app
             .execute_contract(
                 Addr::unchecked(ANYONE),

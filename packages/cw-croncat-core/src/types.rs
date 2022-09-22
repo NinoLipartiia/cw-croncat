@@ -1,6 +1,7 @@
 use cosmwasm_std::{
     coin, Addr, Api, BankMsg, Coin, CosmosMsg, Empty, Env, GovMsg, IbcMsg, OverflowError,
-    OverflowOperation::Sub, StdError, SubMsgResult, Timestamp, Uint128, Uint64, WasmMsg,
+    OverflowOperation::Sub, StakingMsg, StdError, SubMsgResult, Timestamp, Uint128, Uint64,
+    WasmMsg,
 };
 use cron_schedule::Schedule;
 use cw20::{Cw20CoinVerified, Cw20ExecuteMsg};
@@ -366,6 +367,17 @@ impl Task {
                             _ => valid = false,
                         }
                     }
+                }
+                CosmosMsg::Staking(StakingMsg::Delegate {
+                    validator: _,
+                    amount,
+                }) => {
+                    // Must attach enough balance for staking
+                    if amount.amount.is_zero() {
+                        valid = false;
+                    }
+                    let add = vec![amount.clone()];
+                    amount_for_one_task.checked_add_native(&add)?;
                 }
                 // TODO: Allow send, as long as coverage of assets is correctly handled
                 CosmosMsg::Bank(BankMsg::Send {
