@@ -1,5 +1,7 @@
 use cw_rules_core::msg::QueryConstruct;
-use cw_rules_core::types::{CheckOwnerOfNft, CheckProposalStatus, HasBalanceGte, Rule};
+use cw_rules_core::types::{
+    CheckOwnerOfNft, CheckPassedProposals, CheckProposalStatus, HasBalanceGte, Rule,
+};
 // use schemars::JsonSchema;
 // use serde::{Deserialize, Serialize};
 use serde_cw_value::Value;
@@ -20,7 +22,7 @@ use cw_rules_core::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, RuleResponse};
 
 //use cosmwasm_std::from_binary;
 //use crate::msg::QueryMultiResponse;
-use crate::types::dao::{ProposalResponse, QueryDao, Status};
+use crate::types::dao::{ProposalListResponse, ProposalResponse, QueryDao, Status};
 use generic_query::{GenericQuery, ValueIndex, ValueOrd, ValueOrdering};
 
 // version info for migration info
@@ -86,6 +88,9 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             proposal_id,
             status,
         )?),
+        QueryMsg::CheckPassedProposals(CheckPassedProposals { dao_address }) => {
+            to_binary(&query_dao_passed_proposals(deps, dao_address)?)
+        }
         QueryMsg::GenericQuery(query) => to_binary(&generic_query(deps, query)?),
         QueryMsg::QueryConstruct(QueryConstruct { rules }) => {
             to_binary(&query_construct(deps, rules)?)
@@ -166,6 +171,7 @@ fn query_check_owner_nft(
     Ok((address == res.owner, None))
 }
 
+// Returns (true, vector_of_passed_ids) if some proposals have passed status
 fn query_dao_proposal_status(
     deps: Deps,
     dao_address: String,
@@ -177,6 +183,29 @@ fn query_dao_proposal_status(
         .querier
         .query_wasm_smart(dao_addr, &QueryDao::Proposal { proposal_id })?;
     Ok((res.proposal.status == status, None))
+}
+
+fn query_dao_passed_proposals(
+    deps: Deps,
+    dao_address: String,
+) -> StdResult<RuleResponse<Vec<u64>>> {
+    let dao_addr = deps.api.addr_validate(&dao_address)?;
+    let res: ProposalListResponse = deps.querier.query_wasm_smart(
+        dao_addr,
+        &QueryDao::ListProposals {
+            start_after: None,
+            limit: None,
+        },
+    )?;
+    let mut vec_passed_ids = vec![];
+    let mut has_passed_proposals = false;
+    for proposal_response in res.proposals {
+        if proposal_response.proposal.status == Status::Passed {
+            vec_passed_ids.push(proposal_response.id);
+            has_passed_proposals = true;
+        }
+    }
+    Ok((has_passed_proposals, vec_passed_ids))
 }
 
 // // // GOAL:

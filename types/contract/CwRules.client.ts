@@ -6,7 +6,7 @@
 
 import { CosmWasmClient, SigningCosmWasmClient, ExecuteResult } from "@cosmjs/cosmwasm-stargate";
 import { StdFee } from "@cosmjs/amino";
-import { CheckOwnerOfNftResponse, Binary, CheckOwnerOfNft, CheckProposalStatusResponse, Status, CheckProposalStatus, ExecuteMsg, GenericQueryResponse, GetBalanceResponse, GetCw20BalanceResponse, HasBalanceGteResponse, Balance, Uint128, NativeBalance, Addr, HasBalanceGte, Coin, Cw20CoinVerified, InstantiateMsg, QueryConstructResponse, Rule, ValueIndex, ValueOrdering, QueryConstruct, GenericQuery, QueryMsg, QueryMultiResponse, RuleResponse } from "./CwRules.types";
+import { CheckOwnerOfNftResponse, Binary, CheckOwnerOfNft, CheckProposalStatusResponse, Status, CheckProposalStatus, ExecuteMsg, GenericQueryResponse, GetBalanceResponse, GetCw20BalanceResponse, HasBalanceGteResponse, Balance, Uint128, NativeBalance, Addr, HasBalanceGte, Coin, Cw20CoinVerified, InstantiateMsg, QueryConstructResponse, Rule, ValueIndex, ValueOrdering, QueryConstruct, GenericQuery, QueryMsg, CheckPassedProposals, QueryMultiResponse, RuleResponse } from "./CwRules.types";
 export interface CwRulesReadOnlyInterface {
   contractAddress: string;
   getBalance: ({
@@ -39,6 +39,11 @@ export interface CwRulesReadOnlyInterface {
     nftAddress: string;
     tokenId: string;
   }) => Promise<CheckOwnerOfNftResponse>;
+  checkPassedProposals: ({
+    daoAddress
+  }: {
+    daoAddress: string;
+  }) => Promise<CheckPassedProposalsResponse>;
   checkProposalStatus: ({
     daoAddress,
     proposalId,
@@ -78,6 +83,7 @@ export class CwRulesQueryClient implements CwRulesReadOnlyInterface {
     this.getCw20Balance = this.getCw20Balance.bind(this);
     this.hasBalanceGte = this.hasBalanceGte.bind(this);
     this.checkOwnerOfNft = this.checkOwnerOfNft.bind(this);
+    this.checkPassedProposals = this.checkPassedProposals.bind(this);
     this.checkProposalStatus = this.checkProposalStatus.bind(this);
     this.genericQuery = this.genericQuery.bind(this);
     this.queryConstruct = this.queryConstruct.bind(this);
@@ -139,6 +145,17 @@ export class CwRulesQueryClient implements CwRulesReadOnlyInterface {
         address,
         nft_address: nftAddress,
         token_id: tokenId
+      }
+    });
+  };
+  checkPassedProposals = async ({
+    daoAddress
+  }: {
+    daoAddress: string;
+  }): Promise<CheckPassedProposalsResponse> => {
+    return this.client.queryContractSmart(this.contractAddress, {
+      check_passed_proposals: {
+        dao_address: daoAddress
       }
     });
   };

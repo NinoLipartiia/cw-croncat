@@ -100,12 +100,18 @@ export type QueryMsg = {
 } | {
   check_owner_of_nft: CheckOwnerOfNft;
 } | {
+  check_passed_proposals: CheckPassedProposals;
+} | {
   check_proposal_status: CheckProposalStatus;
 } | {
   generic_query: GenericQuery;
 } | {
   query_construct: QueryConstruct;
 };
+export interface CheckPassedProposals {
+  dao_address: string;
+  [k: string]: unknown;
+}
 export interface QueryMultiResponse {
   data: string[];
   [k: string]: unknown;

@@ -51,3 +51,8 @@ pub struct CheckProposalStatus {
     pub proposal_id: u64,
     pub status: Status,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
+pub struct CheckPassedProposals {
+    pub dao_address: String,
+}
