@@ -53,6 +53,7 @@ fn everything_can_be_de_serialized() {
             gas_limit: Some(150_000),
         }],
         rules: None,
+        custom_actions: vec![],
     }
     .into();
 

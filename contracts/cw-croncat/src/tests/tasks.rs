@@ -44,6 +44,7 @@ fn query_task_hash_success() {
             gas_limit: Some(150_000),
         }],
         rules: None,
+        custom_actions: vec![],
     };
 
     // HASH CHECK!
