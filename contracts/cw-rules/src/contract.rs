@@ -171,7 +171,6 @@ fn query_check_owner_nft(
     Ok((address == res.owner, None))
 }
 
-// Returns (true, vector_of_passed_ids) if some proposals have passed status
 fn query_dao_proposal_status(
     deps: Deps,
     dao_address: String,
@@ -185,6 +184,7 @@ fn query_dao_proposal_status(
     Ok((res.proposal.status == status, None))
 }
 
+// Returns (true, vector_of_passed_ids) if some proposals have passed status
 fn query_dao_passed_proposals(
     deps: Deps,
     dao_address: String,
