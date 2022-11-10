@@ -190,11 +190,15 @@ fn query_dao_passed_proposals(
     dao_address: String,
 ) -> StdResult<RuleResponse<Vec<u64>>> {
     let dao_addr = deps.api.addr_validate(&dao_address)?;
+    // Query the amount of proposals
+    let proposal_count = deps
+        .querier
+        .query_wasm_smart(dao_addr.clone(), &QueryDao::ProposalCount {})?;
     let res: ProposalListResponse = deps.querier.query_wasm_smart(
         dao_addr,
         &QueryDao::ListProposals {
             start_after: None,
-            limit: None,
+            limit: Some(proposal_count),
         },
     )?;
     let mut vec_passed_ids = vec![];

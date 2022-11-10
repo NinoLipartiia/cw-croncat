@@ -17,6 +17,7 @@ pub mod dao {
             start_after: Option<u64>,
             limit: Option<u64>,
         },
+        ProposalCount {},
     }
 
     #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, JsonSchema, Debug)]
