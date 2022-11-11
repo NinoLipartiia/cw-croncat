@@ -197,17 +197,6 @@ impl Action {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
-pub struct CustomAction {
-    pub msg: CustomMsg,
-    pub gas_limit: Option<u64>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
-pub enum CustomMsg {
-    ExecuteDaoProposals { dao_address: Addr },
-}
-
 /// The response required by all rule queries. Bool is needed for croncat, T allows flexible rule engine
 pub type RuleResponse<T> = (bool, T);
 
@@ -334,9 +323,6 @@ pub struct Task {
     /// The cosmos message to call, if time or rules are met
     pub actions: Vec<Action>,
 
-    /// Other actions
-    /// Now only allow automatically executing dao proposals
-    pub custom_actions: Vec<CustomAction>, //???
     /// A prioritized list of messages that can be chained decision matrix
     /// required to complete before task action
     /// Rules MUST return the ResolverResponse type

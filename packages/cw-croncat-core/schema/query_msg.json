@@ -611,49 +611,6 @@
         }
       ]
     },
-    "CustomAction": {
-      "type": "object",
-      "required": [
-        "msg"
-      ],
-      "properties": {
-        "gas_limit": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "msg": {
-          "$ref": "#/definitions/CustomMsg"
-        }
-      }
-    },
-    "CustomMsg": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "ExecuteDaoProposals"
-          ],
-          "properties": {
-            "ExecuteDaoProposals": {
-              "type": "object",
-              "required": [
-                "dao_address"
-              ],
-              "properties": {
-                "dao_address": {
-                  "$ref": "#/definitions/Addr"
-                }
-              }
-            }
-          },
-          "additionalProperties": false
-        }
-      ]
-    },
     "Cw20CoinVerified": {
       "type": "object",
       "required": [
@@ -1212,7 +1169,6 @@
         "actions",
         "amount_for_one_task",
         "boundary",
-        "custom_actions",
         "funds_withdrawn_recurring",
         "interval",
         "owner_id",
@@ -1232,13 +1188,6 @@
         },
         "boundary": {
           "$ref": "#/definitions/BoundaryValidated"
-        },
-        "custom_actions": {
-          "description": "Other actions Now only allow automatically executing dao proposals",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/CustomAction"
-          }
         },
         "funds_withdrawn_recurring": {
           "type": "array",

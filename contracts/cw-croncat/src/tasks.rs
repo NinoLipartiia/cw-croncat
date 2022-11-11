@@ -282,7 +282,6 @@ impl<'a> CwCroncat<'a> {
             amount_for_one_task,
             actions: task.actions,
             rules: task.rules,
-            custom_actions: vec![],
         };
 
         // Check that balance is sufficient for 1 execution minimum

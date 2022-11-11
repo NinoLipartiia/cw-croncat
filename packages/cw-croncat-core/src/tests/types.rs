@@ -489,7 +489,6 @@ fn hashing() {
             address: "foo".to_string(),
             required_balance: coins(5, "atom").into(),
         })]),
-        custom_actions: vec![],
     };
 
     let message = format!(

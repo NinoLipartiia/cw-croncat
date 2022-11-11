@@ -195,6 +195,5 @@ pub fn default_task() -> Task {
         amount_for_one_task: Default::default(),
         actions: Default::default(),
         rules: Default::default(),
-        custom_actions: Default::default(),
     }
 }

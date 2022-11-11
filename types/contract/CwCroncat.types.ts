@@ -179,12 +179,6 @@ export type ValueIndex = {
   index: number;
 };
 export type ValueOrdering = "unit_above" | "unit_above_equal" | "unit_below" | "unit_below_equal" | "equal";
-export type CustomMsg = {
-  ExecuteDaoProposals: {
-    dao_address: Addr;
-    [k: string]: unknown;
-  };
-};
 export interface Croncat {
   Agent?: Agent | null;
   BalanceResponse?: GetBalancesResponse | null;
@@ -360,7 +354,6 @@ export interface Task {
   actions: ActionForEmpty[];
   amount_for_one_task: GenericBalance;
   boundary: BoundaryValidated;
-  custom_actions: CustomAction[];
   funds_withdrawn_recurring: Coin[];
   interval: Interval;
   owner_id: Addr;
@@ -372,11 +365,6 @@ export interface Task {
 export interface BoundaryValidated {
   end?: number | null;
   start?: number | null;
-  [k: string]: unknown;
-}
-export interface CustomAction {
-  gas_limit?: number | null;
-  msg: CustomMsg;
   [k: string]: unknown;
 }
 export interface TaskRequest {
