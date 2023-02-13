@@ -6,7 +6,7 @@ use croncat_sdk_manager::types::{Config, GasPrice};
 use cw20::{Cw20Coin, Cw20CoinVerified, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::{
-    helpers::{check_if_sender_is_task_owner, check_ready_for_execution, gas_fee, get_tasks_addr},
+    helpers::{check_ready_for_execution, gas_fee, get_tasks_addr, AssertCaller},
     msg::ReceiveMsg,
     state::{AGENT_REWARDS, CONFIG, TASKS_BALANCES, TEMP_BALANCES_CW20, TREASURY_BALANCE},
     ContractError,
@@ -34,11 +34,10 @@ pub(crate) fn sub_user_cw20(
     cw20: &Cw20CoinVerified,
 ) -> Result<Uint128, ContractError> {
     let current_balance = TEMP_BALANCES_CW20.may_load(storage, (user_addr, &cw20.address))?;
-    let new_bal = if let Some(bal) = current_balance {
-        bal.checked_sub(cw20.amount).map_err(StdError::overflow)?
-    } else {
-        return Err(ContractError::EmptyBalance {});
-    };
+    let new_bal = current_balance
+        .ok_or(ContractError::EmptyBalance {})?
+        .checked_sub(cw20.amount)
+        .map_err(StdError::overflow)?;
 
     if new_bal.is_zero() {
         TEMP_BALANCES_CW20.remove(storage, (user_addr, &cw20.address));
@@ -118,7 +117,7 @@ pub fn execute_receive_cw20(
         ReceiveMsg::RefillTaskBalance { task_hash } => {
             // Check if sender is task owner
             let tasks_addr = get_tasks_addr(&deps.querier, &config)?;
-            check_if_sender_is_task_owner(&deps.querier, &tasks_addr, &sender, &task_hash)?;
+            sender.assert_caller_is_task_owner(&deps.querier, &tasks_addr, &task_hash)?;
 
             let mut task_balances = TASKS_BALANCES
                 .may_load(deps.storage, task_hash.as_bytes())?
@@ -154,7 +153,8 @@ pub fn execute_refill_task_cw20(
 
     // check if sender is task owner
     let tasks_addr = get_tasks_addr(&deps.querier, &config)?;
-    check_if_sender_is_task_owner(&deps.querier, &tasks_addr, &info.sender, &task_hash)?;
+    info.sender
+        .assert_caller_is_task_owner(&deps.querier, &tasks_addr, &task_hash)?;
 
     let cw20_verified = Cw20CoinVerified {
         address: deps.api.addr_validate(&cw20.address)?,
@@ -267,7 +267,8 @@ pub fn execute_refill_native_balance(
     }
     // Check if sender is task owner
     let tasks_addr = get_tasks_addr(&deps.querier, &config)?;
-    check_if_sender_is_task_owner(&deps.querier, &tasks_addr, &info.sender, &task_hash)?;
+    info.sender
+        .assert_caller_is_task_owner(&deps.querier, &tasks_addr, &task_hash)?;
 
     let mut task_balances = TASKS_BALANCES
         .may_load(deps.storage, task_hash.as_bytes())?

@@ -44,13 +44,7 @@ pub fn evented_idx(_pk: &[u8], d: &Task) -> u64 {
     if d.is_evented() {
         let v = match d.boundary.clone() {
             Boundary::Height(h) => h.start.unwrap_or(Uint64::zero()).into(),
-            Boundary::Time(t) => {
-                if let Some(n) = t.start {
-                    n.nanos()
-                } else {
-                    0
-                }
-            }
+            Boundary::Time(t) => t.start.map(|n| n.nanos()).unwrap_or_default(),
         };
         return v;
     }

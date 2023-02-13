@@ -44,31 +44,6 @@ pub(crate) fn get_tasks_addr(
         )?
         .ok_or(ContractError::InvalidKey {})
 }
-pub(crate) fn query_agent_addr(
-    querier: &QuerierWrapper<Empty>,
-    config: &Config,
-) -> Result<Addr, ContractError> {
-    let (tasks_name, version) = &config.croncat_agents_key;
-    croncat_sdk_factory::state::CONTRACT_ADDRS
-        .query(
-            querier,
-            config.croncat_factory_addr.clone(),
-            (tasks_name, version),
-        )?
-        .ok_or(ContractError::InvalidKey {})
-}
-pub(crate) fn check_if_sender_is_tasks(
-    deps_queries: &QuerierWrapper<Empty>,
-    config: &Config,
-    sender: &Addr,
-) -> Result<(), ContractError> {
-    let tasks_addr = get_tasks_addr(deps_queries, config)?;
-    if tasks_addr != *sender {
-        return Err(ContractError::Unauthorized {});
-    }
-
-    Ok(())
-}
 
 pub(crate) fn get_agents_addr(
     deps_queries: &QuerierWrapper<Empty>,
@@ -145,24 +120,13 @@ pub(crate) fn calculate_required_natives(
     };
     Ok(res)
 }
-pub(crate) fn assert_caller_is_agent_contract(
-    deps_queries: &QuerierWrapper<Empty>,
-    config: &Config,
-    sender: &Addr,
-) -> Result<(), ContractError> {
-    let addr = query_agent_addr(deps_queries, config)?;
-    if addr != *sender {
-        return Err(ContractError::Unauthorized {});
-    }
-    Ok(())
-}
 
 pub fn query_agent(
     querier: &QuerierWrapper<Empty>,
     config: &Config,
     agent_id: String,
 ) -> Result<AgentResponse, ContractError> {
-    let addr = query_agent_addr(querier, config)?;
+    let addr = get_agents_addr(querier, config)?;
 
     // Get the agent from the agent contract
     let response: AgentResponse = querier.query_wasm_smart(
@@ -563,34 +527,13 @@ pub(crate) fn recalculate_cw20(
     }))
 }
 
-pub(crate) fn check_if_sender_is_task_owner(
-    querier: &QuerierWrapper,
-    tasks_addr: &Addr,
-    sender: &Addr,
-    task_hash: &str,
-) -> Result<(), ContractError> {
-    let task_response: croncat_sdk_tasks::types::TaskResponse = querier.query_wasm_smart(
-        tasks_addr,
-        &croncat_sdk_tasks::msg::TasksQueryMsg::Task {
-            task_hash: task_hash.to_owned(),
-        },
-    )?;
-    let Some(task) = task_response.task else {
-        return Err(ContractError::NoTaskHash {  });
-    };
-    if task.owner_addr.ne(sender) {
-        return Err(ContractError::Unauthorized {});
-    }
-    Ok(())
-}
-
 pub fn create_task_completed_msg(
     querier: &QuerierWrapper<Empty>,
     config: &Config,
     agent_id: &Addr,
     is_block_slot_task: bool,
 ) -> Result<CosmosMsg, ContractError> {
-    let addr = query_agent_addr(querier, config)?;
+    let addr = get_agents_addr(querier, config)?;
     let args = AgentOnTaskCompleted {
         agent_id: agent_id.to_owned(),
         is_block_slot_task,
@@ -602,4 +545,70 @@ pub fn create_task_completed_msg(
     });
 
     Ok(execute)
+}
+
+pub(crate) trait AssertCaller {
+    fn assert_caller_is_agent_contract(
+        &self,
+        deps_queries: &QuerierWrapper<Empty>,
+        config: &Config,
+    ) -> Result<(), ContractError>;
+
+    fn assert_caller_is_tasks_contract(
+        &self,
+        deps_queries: &QuerierWrapper<Empty>,
+        config: &Config,
+    ) -> Result<(), ContractError>;
+
+    fn assert_caller_is_task_owner(
+        &self,
+        querier: &QuerierWrapper,
+        tasks_addr: &Addr,
+        task_hash: &str,
+    ) -> Result<(), ContractError>;
+}
+
+impl AssertCaller for Addr {
+    fn assert_caller_is_agent_contract(
+        &self,
+        deps_queries: &QuerierWrapper<Empty>,
+        config: &Config,
+    ) -> Result<(), ContractError> {
+        let addr = get_agents_addr(deps_queries, config)?;
+        if addr != *self {
+            return Err(ContractError::Unauthorized {});
+        }
+        Ok(())
+    }
+
+    fn assert_caller_is_tasks_contract(
+        &self,
+        deps_queries: &QuerierWrapper<Empty>,
+        config: &Config,
+    ) -> Result<(), ContractError> {
+        let tasks_addr = get_tasks_addr(deps_queries, config)?;
+        if tasks_addr != *self {
+            return Err(ContractError::Unauthorized {});
+        }
+        Ok(())
+    }
+
+    fn assert_caller_is_task_owner(
+        &self,
+        querier: &QuerierWrapper,
+        tasks_addr: &Addr,
+        task_hash: &str,
+    ) -> Result<(), ContractError> {
+        let task_response: croncat_sdk_tasks::types::TaskResponse = querier.query_wasm_smart(
+            tasks_addr,
+            &croncat_sdk_tasks::msg::TasksQueryMsg::Task {
+                task_hash: task_hash.to_owned(),
+            },
+        )?;
+        let task = task_response.task.ok_or(ContractError::NoTaskHash {})?;
+        if task.owner_addr.ne(self) {
+            return Err(ContractError::Unauthorized {});
+        }
+        Ok(())
+    }
 }

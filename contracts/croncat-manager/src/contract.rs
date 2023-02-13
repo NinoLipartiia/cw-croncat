@@ -18,12 +18,12 @@ use crate::balances::{
     execute_refill_task_cw20, execute_user_withdraw, query_users_balances, sub_user_cw20,
 };
 use crate::error::ContractError;
+use crate::helpers::AssertCaller;
 use crate::helpers::{
-    assert_caller_is_agent_contract, attached_natives, calculate_required_natives,
-    check_if_sender_is_tasks, check_ready_for_execution, create_bank_send_message,
-    create_task_completed_msg, finalize_task, gas_with_fees, get_agents_addr, get_tasks_addr,
-    is_after_boundary, is_before_boundary, parse_reply_msg, query_agent, recalculate_cw20,
-    remove_task_balance, replace_values, task_sub_msgs,
+    attached_natives, calculate_required_natives, check_ready_for_execution,
+    create_bank_send_message, create_task_completed_msg, finalize_task, gas_with_fees,
+    get_agents_addr, get_tasks_addr, is_after_boundary, is_before_boundary, parse_reply_msg,
+    query_agent, recalculate_cw20, remove_task_balance, replace_values, task_sub_msgs,
 };
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
@@ -150,7 +150,8 @@ fn execute_remove_task(
     msg: ManagerRemoveTask,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    check_if_sender_is_tasks(&deps.querier, &config, &info.sender)?;
+    info.sender
+        .assert_caller_is_tasks_contract(&deps.querier, &config)?;
     let task_owner = msg.sender;
     let task_balance = TASKS_BALANCES.load(deps.storage, &msg.task_hash)?;
     let coins_transfer = remove_task_balance(
@@ -226,10 +227,7 @@ fn execute_proxy_call(
         )?
     };
 
-    let Some(mut task) = current_task.task else {
-        // No task
-        return Err(ContractError::NoTask {});
-    };
+    let mut task = current_task.task.ok_or(ContractError::NoTask {})?;
 
     // check if ready between boundary (if any)
     if is_before_boundary(&env.block, Some(&task.boundary)) {
@@ -272,14 +270,13 @@ fn execute_proxy_call(
         replace_values(&mut task, query_responses)?;
 
         // Recalculate cw20 usage and re-check for self-calls
-        let invalidated_after_transform = if let Ok(amounts) =
+        let invalidated_after_transform =
             recalculate_cw20(&task, &config, deps.as_ref(), &env.contract.address)
-        {
-            task.amount_for_one_task.cw20 = amounts;
-            false
-        } else {
-            true
-        };
+                .map(|amounts| {
+                    task.amount_for_one_task.cw20 = amounts;
+                    false
+                })
+                .unwrap_or(true);
 
         // Need to re-check if task has enough cw20's
         // because it could have been changed through transform
@@ -443,7 +440,8 @@ fn execute_create_task_balance(
     msg: ManagerCreateTaskBalance,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    check_if_sender_is_tasks(&deps.querier, &config, &info.sender)?;
+    info.sender
+        .assert_caller_is_tasks_contract(&deps.querier, &config)?;
     let (native, ibc) = attached_natives(&config.native_denom, info.funds)?;
     let cw20 = msg.cw20;
     if let Some(attached_cw20) = &cw20 {
@@ -491,7 +489,8 @@ fn execute_withdraw_agent_rewards(
     let mut fail_on_zero_balance = true;
 
     if let Some(arg) = args {
-        assert_caller_is_agent_contract(&deps.querier, &config, &info.sender)?;
+        info.sender
+            .assert_caller_is_agent_contract(&deps.querier, &config)?;
         agent_id = Addr::unchecked(arg.agent_id);
         payable_account_id = Addr::unchecked(arg.payable_account_id);
         fail_on_zero_balance = false;

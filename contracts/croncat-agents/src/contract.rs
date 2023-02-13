@@ -246,11 +246,9 @@ fn register_agent(
         });
     }
 
-    let payable_id = if let Some(addr) = payable_account_id {
-        deps.api.addr_validate(&addr)?
-    } else {
-        account.clone()
-    };
+    let payable_id = payable_account_id
+        .map(|addr| deps.api.addr_validate(&addr))
+        .unwrap_or_else(|| Ok(account.clone()))?;
 
     let mut active_agents_vec: Vec<Addr> = AGENTS_ACTIVE
         .may_load(deps.storage)?
@@ -546,13 +544,9 @@ fn get_agent_status(
     // Pending
     let mut pending_iter = AGENTS_PENDING.iter(storage)?;
     // If agent is pending, Check if they should get nominated to checkin to become active
-    let agent_position = if let Some(pos) = pending_iter.position(|address| {
-        if let Ok(addr) = address {
-            &addr == account_id
-        } else {
-            false
-        }
-    }) {
+    let agent_position = if let Some(pos) =
+        pending_iter.position(|address| address.map(|addr| &addr == account_id).unwrap_or(false))
+    {
         pos
     } else {
         // Check for active
