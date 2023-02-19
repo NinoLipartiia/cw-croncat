@@ -576,9 +576,10 @@ impl AssertCaller for Addr {
     ) -> Result<(), ContractError> {
         let addr = get_agents_addr(deps_queries, config)?;
         if addr != *self {
-            return Err(ContractError::Unauthorized {});
+            Err(ContractError::Unauthorized {})
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn assert_caller_is_tasks_contract(
@@ -588,9 +589,10 @@ impl AssertCaller for Addr {
     ) -> Result<(), ContractError> {
         let tasks_addr = get_tasks_addr(deps_queries, config)?;
         if tasks_addr != *self {
-            return Err(ContractError::Unauthorized {});
+            Err(ContractError::Unauthorized {})
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     fn assert_caller_is_task_owner(
@@ -607,8 +609,9 @@ impl AssertCaller for Addr {
         )?;
         let task = task_response.task.ok_or(ContractError::NoTaskHash {})?;
         if task.owner_addr.ne(self) {
-            return Err(ContractError::Unauthorized {});
+            Err(ContractError::Unauthorized {})
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }

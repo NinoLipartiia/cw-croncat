@@ -264,10 +264,10 @@ pub(crate) fn check_if_sender_is_manager(
 ) -> Result<(), ContractError> {
     let manager_addr = get_manager_addr(deps_queries, config)?;
     if manager_addr != *sender {
-        return Err(ContractError::Unauthorized {});
+        Err(ContractError::Unauthorized {})
+    } else {
+        Ok(())
     }
-
-    Ok(())
 }
 
 pub(crate) fn get_manager_addr(

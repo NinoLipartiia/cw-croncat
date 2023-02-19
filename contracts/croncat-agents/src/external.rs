@@ -19,11 +19,12 @@ pub mod croncat_tasks_contract {
     ) -> StdResult<()> {
         let addr = query_tasks_addr(deps_queries, config)?;
         if addr != *sender {
-            return Err(cosmwasm_std::StdError::GenericErr {
+            Err(cosmwasm_std::StdError::GenericErr {
                 msg: ContractError::Unauthorized {}.to_string(),
-            });
+            })
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     pub(crate) fn query_tasks_addr(
@@ -124,10 +125,11 @@ pub mod croncat_manager_contract {
     ) -> StdResult<()> {
         let addr = query_manager_addr(deps_queries, config)?;
         if addr != *sender {
-            return Err(cosmwasm_std::StdError::GenericErr {
+            Err(cosmwasm_std::StdError::GenericErr {
                 msg: ContractError::Unauthorized {}.to_string(),
-            });
+            })
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
